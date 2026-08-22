@@ -9,7 +9,7 @@ maalign score.mid recording.flac
 ```
 
 ```
-  score  : 754 notes, 31 bars, 124 quarters
+  score  : 754 notes, 31 bars (4/4, 4 quarters/bar), 124 quarters
   audio  : 115.93 s
   tempo  : quarter = 64.2 (global estimate)
   path   : monotone=True  tempo 33-75 qpm (median 71, ratio 2.30)
@@ -65,6 +65,10 @@ al.local_tempo(31.7)    # instantaneous tempo there, quarters/min
 print(validate.onset_agreement(al))
 validate.click_track(al, "check.wav")
 ```
+
+`maalign.tsm` warps a recording onto any timeline you can express as a time
+map -- see [Putting several recordings on one
+clock](#putting-several-recordings-on-one-clock).
 
 ---
 
@@ -122,11 +126,104 @@ cannot see it.
 
 Which is why `--refine` is off by default, and why the click track exists.
 
+### On dense music, onset agreement stops working entirely
+
+Bach's fugue has about 6 notes per second. Prokofiev's *Precipitato* has 14 —
+an onset every ~70 ms — and at that density a prediction lands within 35 ms of
+*some* onset by chance. Three different pianists, aligned to the same score:
+
+| | median | baseline |
+|---|---|---|
+| Pollini | 37.0 ms | 49.0 ms |
+| Horowitz 1953 | 36.5 ms | 53.5 ms |
+| Sokolov | 37.3 ms | 57.9 ms |
+
+All three alignments were in fact good — verified other ways below — but the
+metric has almost no room left to show it. **The denser the music, the less
+onset agreement tells you.** Check the gap between the two columns before
+believing either.
+
+---
+
+## When you have more than one recording
+
+`cross_recording_agreement` is the check to reach for when onset agreement runs
+out of room. It uses no onset detector at all. If two alignments are right then
+at the same *score* position both recordings contain the same harmony, so it
+samples chroma from each at its own aligned time and compares — scored against
+the same statistic at deliberately wrong offsets, which is chance level.
+
+```python
+from maalign import align, validate
+
+als = {n: align("score.mxl", f"{n}.mp3")
+       for n in ("pollini", "horowitz1953", "sokolov")}
+print(validate.cross_recording_agreement(als))
+```
+
+```
+              pair   aligned    +0.5s    +2.0s    +8.0s
+pollini~horowitz1953   0.933    0.852    0.783    0.691
+   pollini~sokolov     0.943    0.879    0.793    0.733
+horowitz1953~sokolov   0.927    0.860    0.780    0.731
+
+  mean aligned 0.935   mean chance 0.752   lift +0.183
+```
+
+**Read the falloff, not the absolute number.** Similarity is capped by how
+differently the performers voice the same chords, so it never reaches 1.0. What
+proves the alignment is the shape: a sharp peak at zero that has already lost
+0.08 by half a second and decays monotonically. A flat profile means the
+alignments are not locating the same music.
+
+`by_bar=True` returns the same statistic per bar, which localises weakness:
+here it found bars 176–177 (the three pianists end the final chord differently)
+and bar 1 (different lead-ins), with a mean of 0.934 and a minimum of 0.857 —
+no bar anywhere near the 0.75 chance level, so nothing lost the thread.
+
+---
+
+## Putting several recordings on one clock
+
+With every recording mapped to score position, you can warp them onto a shared
+timeline so bar 40 arrives at the same second in all of them — for A/B
+listening, for stacking, for driving one set of visuals from any of them.
+
+```python
+from maalign import align, tsm
+import numpy as np
+
+als = {n: align("score.mxl", f"{n}.mp3") for n in names}
+grid = np.linspace(0, als[names[0]].score.quarter_length, 4000)
+target = np.mean([a.time_of(grid) for a in als.values()], axis=0)
+
+for n, a in als.items():
+    tsm.warp_to_timeline(a, target, f"{n}_ontime.wav", quarters=grid)
+```
+
+Two notes from doing this in anger:
+
+**Use the mean, not the median, as the target.** With three performances the
+elementwise median is just whichever one sits in the middle at each point — in
+our case Horowitz everywhere. That leaves him untouched and time-stretches only
+the other two, which is not a fair comparison if the performances are what you
+are judging.
+
+**Trim to the score, not to the path.** Live recordings run on into applause,
+and warping a span that includes eight seconds of clapping stretches the
+clapping too.
+
+`tsm` defaults to WSOLA. See its docstring for why not the phase vocoder.
+
 ---
 
 ## How to tell whether *your* alignment worked
 
 Three checks that fail in different ways. Use all three; the cheap one first.
+
+**0. If you have a second recording of the same score**, use
+[`cross_recording_agreement`](#when-you-have-more-than-one-recording). It is
+the strongest of these and the only one that stays sharp on dense music.
 
 **1. Listen to the click track.** `out/<name>.click.wav` is your recording with
 a click on every predicted barline. Ten seconds of listening settles what the
@@ -245,6 +342,10 @@ a new method. If you need the mature toolkit, use
 - Prätzlich, Driedger & Müller (2016), *Memory-restricted multiscale DTW* — the
   coarse-then-banded-refinement structure.
 - Müller et al. (2021), *Sync Toolbox* — the reference implementation.
+- Verhelst & Roelands (1993), *An overlap-add technique based on waveform
+  similarity (WSOLA)* — the time-stretch in `maalign.tsm`.
+- Laroche & Dolson (1999), *Improved phase vocoder time-scale modification* —
+  the identity phase locking in the fallback method.
 - Shan & Tsai (2024), *Just Label the Repeats* — on the repeat problem above.
 
 ## License

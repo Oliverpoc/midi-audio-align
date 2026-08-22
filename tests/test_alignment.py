@@ -170,3 +170,40 @@ def test_barlines_are_evenly_spaced_in_score_time(fixtures):
     q = al.position_of(al.barlines())
     spacing = np.diff(q)
     assert np.allclose(spacing, sc.bar_length_quarters, atol=0.3)
+
+
+# --------------------------------------------------------------------------
+# Cross-recording agreement: two different "performances" of one score.
+# --------------------------------------------------------------------------
+
+def test_cross_recording_agreement_peaks_at_zero_offset(tmp_path, fixtures):
+    """Aligned sampling must beat offset sampling, and fall off with offset."""
+    from maalign import validate
+
+    score_path, audio_a, sc, _, _ = fixtures
+
+    # a second, differently-shaped performance of the same score
+    q = np.arange(0.0, sc.quarter_length + 0.02, 0.02)
+    x = q / sc.quarter_length
+    qpm2 = BASE_QPM * 0.82 * (1.0 + 0.10 * np.sin(2 * np.pi * x * 5.0 + 1.1))
+    sec2 = np.concatenate([[0.0], np.cumsum(60.0 / qpm2 * 0.02)[:-1]])
+    audio_b = str(tmp_path / "perf_b.wav")
+    synth.write_wav(audio_b, synth.render(sc, BASE_QPM,
+                                          time_map=lambda v: np.interp(v, q, sec2)))
+
+    als = {"a": align(score_path, audio_a), "b": align(score_path, audio_b)}
+    ca = validate.cross_recording_agreement(als, n_samples=400,
+                                            offsets=(0.5, 2.0, 6.0))
+    print("\n" + str(ca))
+
+    assert ca.mean_aligned > ca.mean_chance
+    assert ca.lift > 0.05
+    means = [np.mean(list(ca.offset_pairs[o].values())) for o in (0.5, 2.0, 6.0)]
+    assert ca.mean_aligned > means[0] > means[2]      # monotone falloff
+
+
+def test_cross_recording_agreement_needs_two(fixtures):
+    from maalign import validate
+    score_path, audio_a, _, _, _ = fixtures
+    with pytest.raises(ValueError):
+        validate.cross_recording_agreement({"a": align(score_path, audio_a)})

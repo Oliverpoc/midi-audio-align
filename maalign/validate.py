@@ -153,3 +153,104 @@ def path_report(alignment: Alignment, edge_trim: float = 0.03) -> dict:
 
 # Kept for backwards compatibility with 0.1.0's name.
 monotonicity_report = path_report
+
+
+# ---------------------------------------------------------------------------
+# Cross-recording agreement.
+#
+# onset_agreement above has a blind spot that only shows up on dense music.
+# Its baseline is "predict with no alignment at all", and on a piece with ~14
+# notes per second -- onsets every ~70 ms -- even a wrong prediction lands
+# within 35 ms of *some* onset by chance. Measured on Prokofiev's Precipitato
+# the aligned median was 37 ms against an unaligned baseline of 49 ms: a real
+# improvement, but far too little separation to conclude anything from.
+#
+# When you have two or more recordings of the same score, this is the check to
+# use instead. It needs no onset detector. If the alignments are right then at
+# the same SCORE position every recording must contain the same harmony, so
+# sample chroma from each at its own aligned time and compare. Scored against
+# the same statistic at deliberately wrong offsets, which is chance level.
+# ---------------------------------------------------------------------------
+
+@dataclass
+class CrossAgreement:
+    pairs: dict                 # "a~b" -> similarity at the aligned positions
+    offset_pairs: dict          # offset seconds -> {"a~b": similarity}
+    mean_aligned: float
+    mean_chance: float
+    by_bar: np.ndarray = None   # mean pairwise agreement per bar, if requested
+
+    @property
+    def lift(self) -> float:
+        return self.mean_aligned - self.mean_chance
+
+    def __str__(self) -> str:
+        offs = sorted(self.offset_pairs)
+        head = f"{'pair':>18}{'aligned':>10}" + "".join(f"{'+'+str(o)+'s':>9}" for o in offs)
+        rows = [head]
+        for k in self.pairs:
+            rows.append(f"{k:>18}{self.pairs[k]:10.3f}"
+                        + "".join(f"{self.offset_pairs[o][k]:9.3f}" for o in offs))
+        rows.append(f"\n  mean aligned {self.mean_aligned:.3f}   "
+                    f"mean chance {self.mean_chance:.3f}   lift {self.lift:+.3f}")
+        return "\n".join(rows)
+
+
+def cross_recording_agreement(alignments: dict, n_samples: int = 1500,
+                              offsets=(0.5, 2.0, 8.0), by_bar: bool = False,
+                              sr: int = SR, hop: int = HOP) -> CrossAgreement:
+    """Compare recordings of one score to each other through their alignments.
+
+    `alignments` maps a name to an Alignment. All must be of the same score.
+
+    A correct set of alignments shows high similarity at offset 0 that falls
+    off steeply within half a second. A flat profile means the alignments are
+    not actually locating the same music.
+
+    Similarity is bounded above by how differently the performers voice the
+    same chords, so it will not reach 1.0 even when the alignment is perfect.
+    Read the falloff, not the absolute number.
+    """
+    import itertools
+
+    names = list(alignments)
+    if len(names) < 2:
+        raise ValueError("need at least two alignments")
+
+    chroma, scores = {}, []
+    for n in names:
+        al = alignments[n]
+        y, _ = librosa.load(al.audio_path, sr=sr, mono=True)
+        C = librosa.feature.chroma_cens(y=y, sr=sr, hop_length=hop)
+        chroma[n] = C / (np.linalg.norm(C, axis=0, keepdims=True) + 1e-9)
+        scores.append(al.score.quarter_length)
+
+    q_end = min(scores)
+    grid = np.linspace(q_end * 0.02, q_end * 0.98, n_samples)
+
+    def vecs(n, q, shift=0.0):
+        t = alignments[n].time_of(q) + shift
+        f = np.clip((t * sr / hop).astype(int), 0, chroma[n].shape[1] - 1)
+        return chroma[n][:, f]
+
+    def pairwise(q, shift=0.0):
+        return {f"{a}~{b}": float(np.mean(np.sum(vecs(a, q) * vecs(b, q, shift), axis=0)))
+                for a, b in itertools.combinations(names, 2)}
+
+    aligned = pairwise(grid)
+    off = {o: pairwise(grid, o) for o in offsets}
+    chance = [np.mean(list(off[o].values())) for o in offsets if o >= 2.0] or \
+             [np.mean(list(off[o].values())) for o in offsets]
+
+    per_bar = None
+    if by_bar:
+        al0 = alignments[names[0]]
+        bar_q = al0.score.bar_length_quarters
+        nb = al0.score.n_bars
+        per_bar = np.array([
+            np.mean(list(pairwise(np.linspace(b * bar_q, (b + 1) * bar_q, 12)).values()))
+            for b in range(nb)])
+
+    return CrossAgreement(pairs=aligned, offset_pairs=off,
+                          mean_aligned=float(np.mean(list(aligned.values()))),
+                          mean_chance=float(np.mean(chance)), by_bar=per_bar)
