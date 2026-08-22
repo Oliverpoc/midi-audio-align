@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "midi-audio-align"
+version = "0.1.0"
+description = "Align a symbolic score (MIDI / MusicXML / kern) to a recording of it, and check the result."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Qi Wang" }]
+keywords = ["music information retrieval", "audio to score alignment",
+            "dynamic time warping", "midi", "chroma", "score following"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Topic :: Multimedia :: Sound/Audio :: Analysis",
+  "Intended Audience :: Science/Research",
+]
+dependencies = [
+  "numpy>=1.22",
+  "scipy>=1.8",
+  "librosa>=0.10",
+  "music21>=8.0",
+]
+
+[project.optional-dependencies]
+plot = ["matplotlib>=3.5"]
+dev  = ["pytest>=7.0", "matplotlib>=3.5"]
+
+[project.urls]
+Homepage = "https://github.com/Oliverpoc/midi-audio-align"
+Issues = "https://github.com/Oliverpoc/midi-audio-align/issues"
+
+[project.scripts]
+maalign = "maalign.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["maalign*"]

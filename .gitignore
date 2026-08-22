@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+
+# Fetched assets are NEVER committed -- examples/fetch_bach.py downloads them.
+# The Bach recording is CC0, but the Humdrum encoding carries
+# "Copyright 1994, David Huron / rights to all derivative electronic formats
+# reserved", so neither it nor anything derived from it belongs in this repo.
+assets/
+out/
+*.wav
+*.flac
+*.mp3
+*.mid
+*.krn
+*.musicxml
+*.mxl
+.pytest_cache/
