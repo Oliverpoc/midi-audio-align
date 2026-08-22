@@ -38,11 +38,21 @@ class Note:
 class Score:
     notes: List[Note]
     n_bars: int
-    beats_per_bar: int
+    beats_per_bar: int          # the time signature's numerator, for display
     quarter_length: float
     source: str
+    # Note onsets are measured in QUARTER notes, so a bar is only
+    # `beats_per_bar` long when the denominator is 4. In 7/8 a bar is
+    # 7 * 4/8 = 3.5 quarters. Getting this wrong silently doubles or halves
+    # every barline, which the alignment itself never notices.
+    bar_length_quarters: float = 4.0
+    time_signature_denominator: int = 4
     time_signature_is_trustworthy: bool = True
     warnings: List[str] = field(default_factory=list)
+
+    @property
+    def time_signature(self) -> str:
+        return f"{self.beats_per_bar}/{self.time_signature_denominator}"
 
     @property
     def onsets(self) -> np.ndarray:
@@ -68,12 +78,18 @@ def load(path: str) -> Score:
         raise ValueError(f"no notes found in {path}")
 
     ts = s.flatten().getElementsByClass("TimeSignature")
-    bpb = int(ts[0].numerator) if len(ts) else 4
     trustworthy = len(ts) > 0
+    num = int(ts[0].numerator) if trustworthy else 4
+    den = int(ts[0].denominator) if trustworthy else 4
+    bar_q = num * 4.0 / den
     if not trustworthy:
         warnings.append(
             "no time signature found; assuming 4/4. Bar numbers derived from "
             "this score are guesses. Common with downloaded performance MIDI.")
+    if len({(t.numerator, t.denominator) for t in ts}) > 1:
+        warnings.append(
+            "the score changes time signature; bar positions are computed from "
+            f"the first one ({num}/{den}) and will drift after the change.")
 
     try:
         n_bars = len(s.parts[0].getElementsByClass("Measure"))
@@ -81,10 +97,11 @@ def load(path: str) -> Score:
         n_bars = 0
     ql = float(s.duration.quarterLength)
     if n_bars <= 1:
-        n_bars = int(np.ceil(ql / bpb))
+        n_bars = int(np.ceil(ql / bar_q))
         warnings.append("no measure structure in the file; bars inferred from "
                         "total length and the time signature.")
 
-    return Score(notes=notes, n_bars=n_bars, beats_per_bar=bpb,
+    return Score(notes=notes, n_bars=n_bars, beats_per_bar=num,
                  quarter_length=ql, source=path,
+                 bar_length_quarters=bar_q, time_signature_denominator=den,
                  time_signature_is_trustworthy=trustworthy, warnings=warnings)

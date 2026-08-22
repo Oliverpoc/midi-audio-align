@@ -69,7 +69,9 @@ def main(argv=None) -> int:
     out = {
         "score": a.score, "audio": a.audio, "refined": al.refined,
         "qpm": al.qpm, "audio_duration": al.audio_duration,
-        "beats_per_bar": al.score.beats_per_bar, "n_bars": al.score.n_bars,
+        "time_signature": al.score.time_signature,
+        "bar_length_quarters": al.score.bar_length_quarters,
+        "n_bars": al.score.n_bars,
         "time_signature_is_trustworthy": al.score.time_signature_is_trustworthy,
         "warnings": al.score.warnings,
         "quarters": al.quarters.tolist(), "seconds": al.seconds.tolist(),

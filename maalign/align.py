@@ -35,8 +35,13 @@ class Alignment:
                          self.seconds, self.quarters)
 
     def barlines(self) -> np.ndarray:
-        bpb = self.score.beats_per_bar
-        return self.time_of(np.arange(0, self.score.n_bars) * bpb)
+        """Every barline, in recording seconds.
+
+        Uses bar length in QUARTERS, not the time signature numerator -- in 7/8
+        a bar is 3.5 quarters, and using 7 would place every other barline.
+        """
+        return self.time_of(np.arange(0, self.score.n_bars)
+                            * self.score.bar_length_quarters)
 
     def note_times(self) -> np.ndarray:
         return self.time_of([n.onset for n in self.score.notes])
@@ -73,8 +78,9 @@ def align(score_path: str, audio_path: str, *, refine: bool = False,
     y_ref = synth.render(score, qpm, sr=sr)
 
     if verbose:
-        print(f"  score  : {len(score)} notes, {score.n_bars} bars, "
-              f"{score.quarter_length:.0f} quarters")
+        print(f"  score  : {len(score)} notes, {score.n_bars} bars "
+              f"({score.time_signature}, {score.bar_length_quarters:g} "
+              f"quarters/bar), {score.quarter_length:.0f} quarters")
         print(f"  audio  : {duration:.2f} s")
         print(f"  tempo  : quarter = {qpm:.1f} (global estimate)")
 

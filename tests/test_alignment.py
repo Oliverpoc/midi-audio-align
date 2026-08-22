@@ -129,3 +129,44 @@ def test_barlines_land_inside_the_recording(fixtures):
     assert b[0] >= -1e-6
     assert b[-1] <= al.audio_duration + 1e-6
     assert np.all(np.diff(b) > 0)
+
+
+# --------------------------------------------------------------------------
+# Regression: bar length must come from the full time signature, not just the
+# numerator. Note onsets are in quarters, so a 7/8 bar is 7*4/8 = 3.5 quarters.
+# Using the numerator placed every barline at twice its true position, which
+# the alignment itself never notices -- only the click track sounds wrong.
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("num,den,expected_bar_q", [
+    (4, 4, 4.0), (3, 4, 3.0), (7, 8, 3.5), (6, 8, 3.0),
+    (5, 4, 5.0), (12, 8, 6.0), (2, 2, 4.0),
+])
+def test_bar_length_in_quarters(tmp_path, num, den, expected_bar_q):
+    from music21 import stream, note as m21note, meter
+    from maalign.score import load as load_score
+
+    n_bars = 6
+    p = stream.Part()
+    p.append(meter.TimeSignature(f"{num}/{den}"))
+    for _ in range(n_bars):
+        p.append(m21note.Note("C4", quarterLength=expected_bar_q))
+    s = stream.Score()
+    s.insert(0, p)
+    path = str(tmp_path / f"ts_{num}_{den}.mid")
+    s.write("midi", fp=path)
+
+    sc = load_score(path)
+    assert sc.bar_length_quarters == pytest.approx(expected_bar_q)
+    assert sc.beats_per_bar == num
+    assert sc.time_signature == f"{num}/{den}"
+    assert sc.n_bars * sc.bar_length_quarters == pytest.approx(
+        sc.quarter_length, rel=0.02)
+
+
+def test_barlines_are_evenly_spaced_in_score_time(fixtures):
+    score_path, audio_path, sc, _, _ = fixtures
+    al = align(score_path, audio_path)
+    q = al.position_of(al.barlines())
+    spacing = np.diff(q)
+    assert np.allclose(spacing, sc.bar_length_quarters, atol=0.3)
