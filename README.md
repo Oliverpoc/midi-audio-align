@@ -1,5 +1,9 @@
 # midi-audio-align
 
+[![tests](https://github.com/Oliverpoc/midi-audio-align/actions/workflows/test.yml/badge.svg)](https://github.com/Oliverpoc/midi-audio-align/actions/workflows/test.yml)
+[![python](https://img.shields.io/badge/python-3.9%20%7C%203.11%20%7C%203.12-blue)](https://github.com/Oliverpoc/midi-audio-align)
+[![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 Align a symbolic score — MIDI, MusicXML, Humdrum `**kern` — to a recording of
 someone playing it, and get back a map from score position to time in the
 recording. Then check whether the map is any good.
@@ -38,6 +42,34 @@ pip install git+https://github.com/Oliverpoc/midi-audio-align
 Python ≥3.9. Pulls numpy, scipy, librosa and music21. `pip install
 'midi-audio-align[plot]'` adds matplotlib for the diagnostic plot.
 
+Roughly 0.07x realtime on a laptop CPU: a 2-minute recording aligns in about
+8 seconds.
+
+**Memory is the real constraint, and it grows with the square of the piece.**
+librosa builds the full n x m cost matrix before applying any band, so
+`--band` prunes the *search* but does not reduce the *allocation*. At the
+default `--hop 512` that is about 28 bytes per cell:
+
+| length | coarse matrix | memory |
+|---|---|---|
+| 2 min | 5.2k x 5.2k | 0.7 GB |
+| 4 min | 10k x 10k | 3.0 GB |
+| 10 min | 26k x 26k | 19 GB |
+| 20 min | 52k x 52k | 75 GB — will not run |
+
+So past about four minutes, **raise `--hop` and add `--refine`**. Memory falls
+with the square of the hop, and the banded refinement pass costs only
+O(n x band), so it wins the resolution back. Measured on the Bach example:
+
+| | matrix | onset median |
+|---|---|---|
+| `--hop 512` | 0.70 GB | 27.3 ms |
+| `--hop 2048` | 0.04 GB | 39.6 ms |
+| `--hop 2048 --refine` | 0.04 GB | **30.7 ms** |
+
+Seventeen times less memory for the same answer. A 20-minute movement at
+`--hop 2048 --refine` needs about 4.7 GB.
+
 ---
 
 ## Use it
@@ -69,6 +101,32 @@ validate.click_track(al, "check.wav")
 `maalign.tsm` warps a recording onto any timeline you can express as a time
 map -- see [Putting several recordings on one
 clock](#putting-several-recordings-on-one-clock).
+
+---
+
+## What comes out
+
+The CLI writes three files into `-o/--outdir`, named after the recording.
+
+**`<name>.alignment.json`** — the machine-readable result.
+
+| key | |
+|---|---|
+| `quarters`, `seconds` | the map itself: matching arrays of knots. `seconds[i]` is when the performer reached score position `quarters[i]`. Interpolate between them, or use the `Alignment` methods below. |
+| `barline_seconds` | every barline, already resolved to recording time |
+| `qpm` | the global tempo estimate used for the reference synthesis |
+| `time_signature`, `bar_length_quarters`, `n_bars` | `bar_length_quarters` is what you multiply bar numbers by — in 7/8 it is 3.5, not 7 |
+| `time_signature_is_trustworthy` | false when the score carried no time signature and 4/4 was assumed, which makes every bar number a guess |
+| `warnings` | anything odd found while parsing the score |
+| `onset_agreement` | `median_ms`, `p95_ms`, `within_50ms`, `within_100ms`, and the same statistics for the unaligned baseline. Read the two together — see [Does it work?](#does-it-work) |
+| `path` | `strictly_monotone`, tempo percentiles, `max_audio_gap_s` (a long stall means audio with no score to match) and `max_score_gap_q` |
+| `refined` | whether the second DTW pass ran |
+
+**`<name>.click.wav`** — the recording with a click on every predicted barline.
+Suppress with `--no-click`.
+
+**`<name>.path.png`** — warping path and recovered local tempo. Needs
+matplotlib; suppress with `--no-plot`.
 
 ---
 
@@ -328,6 +386,78 @@ it, or publishing files derived from it, is not — so this project does neither
 If you need an unencumbered score for the same music, the Open Well-Tempered
 Clavier project also released the notation CC0, at
 [musescore.com/openscore](https://musescore.com/openscore).
+
+---
+
+## API
+
+```python
+from maalign import align, load_score, validate, tsm, synth, features, dtw
+```
+
+**`align(score_path, audio_path, *, refine=False, band_rad=0.15, qpm=None,
+sr=22050, hop=512, verbose=False) -> Alignment`**
+
+**`Alignment`**
+
+| | |
+|---|---|
+| `.time_of(quarters)` | score position → seconds in the recording. Accepts scalars or arrays. |
+| `.position_of(seconds)` | the inverse |
+| `.barlines()` | every barline in recording seconds |
+| `.note_times()` | every score note onset in recording seconds |
+| `.local_tempo(seconds, window=0.8)` | instantaneous tempo there, quarters/min |
+| `.quarters`, `.seconds` | the raw knots |
+| `.score`, `.audio_path`, `.audio_duration`, `.qpm`, `.refined` | |
+
+**`load_score(path) -> Score`** — MIDI, MusicXML, `**kern`, MEI, ABC.
+
+| | |
+|---|---|
+| `.notes` | list of `Note(onset, duration, midi, part)`, onsets in quarter notes |
+| `.onsets` | unique onset positions |
+| `.n_bars`, `.bar_length_quarters`, `.beats_per_bar`, `.time_signature` | |
+| `.quarter_length` | total length in quarters |
+| `.time_signature_is_trustworthy`, `.warnings` | |
+
+**`validate`**
+
+| | |
+|---|---|
+| `onset_agreement(al)` | → `OnsetAgreement`. Floor-limited; see the caveats. |
+| `cross_recording_agreement({name: al}, n_samples=1500, offsets=(0.5,2,8), by_bar=False)` | → `CrossAgreement`. The strong check when you have two or more recordings. |
+| `click_track(al, out_path, times=None)` | |
+| `path_plot(al, out_path)` | needs matplotlib |
+| `path_report(al)` | dict of monotonicity and tempo statistics |
+
+**`tsm`** — variable-rate time-stretch.
+
+| | |
+|---|---|
+| `wsola(y, sr, src_times, dst_times, ...)` | default; mono or `(ch, n)` |
+| `phase_vocoder(y, sr, src_times, dst_times, ...)` | mono only; see the module docstring for why it is not the default |
+| `time_stretch(y, sr, src, dst, method="wsola")` | dispatcher |
+| `stretch_file(in_path, out_path, src, dst, sr=44100, ...)` | |
+| `warp_to_timeline(al, target_seconds, out_path, quarters=None)` | warp an aligned recording onto a shared clock |
+
+Lower-level pieces, if you want to build your own pipeline: `features.features`,
+`synth.render`, `dtw.coarse`, `dtw.refine`.
+
+---
+
+## Development
+
+```bash
+git clone https://github.com/Oliverpoc/midi-audio-align
+cd midi-audio-align
+pip install -e ".[dev]"
+pytest -q
+```
+
+The suite synthesizes its own audio from a known rubato curve, so it needs no
+downloads and no copyrighted material — which is why accuracy can be asserted
+in milliseconds and still run in CI. `pytest -q -s` prints the measured
+numbers. `examples/fetch_bach.py` is only needed to try it on real music.
 
 ---
 

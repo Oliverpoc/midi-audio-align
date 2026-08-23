@@ -27,7 +27,12 @@ def main(argv=None) -> int:
     p.add_argument("--qpm", type=float, default=None,
                    help="override the global tempo estimate, quarters/min")
     p.add_argument("--band", type=float, default=0.15,
-                   help="Sakoe-Chiba band radius, fraction of sequence length")
+                   help="Sakoe-Chiba band radius, fraction of sequence length. "
+                        "Prunes the search; does NOT reduce memory")
+    p.add_argument("--hop", type=int, default=512,
+                   help="STFT hop for the coarse pass. Memory scales as "
+                        "1/hop^2 -- raise it for long pieces (see README) and "
+                        "add --refine to win the resolution back")
     p.add_argument("--no-click", action="store_true", help="skip the click track")
     p.add_argument("--no-plot", action="store_true", help="skip the path plot")
     p.add_argument("-q", "--quiet", action="store_true")
@@ -40,7 +45,7 @@ def main(argv=None) -> int:
     if v:
         print("aligning ...")
     al = align(a.score, a.audio, refine=a.refine, band_rad=a.band,
-               qpm=a.qpm, verbose=v)
+               hop=a.hop, qpm=a.qpm, verbose=v)
 
     if not al.score.time_signature_is_trustworthy and v:
         print("  ! no time signature in the score -- bar numbers are guesses")
