@@ -8,8 +8,8 @@ from typing import Optional
 import numpy as np
 import librosa
 
-from . import dtw, synth
-from .features import features, SR, HOP
+from . import backends, synth
+from .features import SR, HOP
 from .score import Score, load as load_score
 
 
@@ -23,6 +23,7 @@ class Alignment:
     audio_path: str
     audio_duration: float
     refined: bool = False
+    backend: str = "chroma-dtw"
 
     def time_of(self, quarters) -> np.ndarray:
         """Score position -> seconds in the recording."""
@@ -54,14 +55,21 @@ class Alignment:
         return (self.position_of(b) - self.position_of(a)) / np.maximum(b - a, 1e-6) * 60.0
 
 
-def align(score_path: str, audio_path: str, *, refine: bool = False,
-          band_rad: float = 0.15, refine_hop: int = 128,
+def align(score_path: str, audio_path: str, *, backend: str = "chroma-dtw",
+          refine: bool = False, band_rad: float = 0.15, refine_hop: int = 128,
           refine_radius_s: float = 0.40, sr: int = SR, hop: int = HOP,
           qpm: Optional[float] = None, verbose: bool = False) -> Alignment:
     """Align a symbolic score to a recording of it.
 
-    `refine` runs a second, higher-resolution banded pass. It is off by default
-    -- see README for why it did not measurably help on real piano audio.
+    `backend` selects the alignment engine. "chroma-dtw" is built in and needs
+    no extra dependency but is quadratic in memory, so raise `hop` on long
+    pieces. "synctoolbox" delegates to the reference implementation, whose
+    MrMsDTW stays roughly linear -- prefer it for whole movements. See
+    `backends.available()`.
+
+    `refine` runs a second, higher-resolution banded pass, and applies only to
+    the built-in backend. It is off by default -- see README for why it did not
+    measurably help on real piano audio.
     """
     score = load_score(score_path)
     for w in score.warnings:
@@ -84,18 +92,13 @@ def align(score_path: str, audio_path: str, *, refine: bool = False,
         print(f"  audio  : {duration:.2f} s")
         print(f"  tempo  : quarter = {qpm:.1f} (global estimate)")
 
-    X = features(y_ref, sr=sr, hop=hop)
-    Y = features(y_perf, sr=sr, hop=hop)
-    tx, ty = dtw.coarse(X, Y, sr=sr, hop=hop, band_rad=band_rad)
-
-    if refine:
-        Xf = features(y_ref, sr=sr, hop=refine_hop)
-        Yf = features(y_perf, sr=sr, hop=refine_hop)
-        tx, ty = dtw.refine(Xf, Yf, sr, refine_hop, tx, ty,
-                            radius_s=refine_radius_s)
+    tx, ty = backends.get(backend)(
+        y_ref, y_perf, sr=sr, hop=hop, band_rad=band_rad, refine=refine,
+        refine_hop=refine_hop, refine_radius_s=refine_radius_s)
 
     # Reference time is linear in score position, so invert it to get quarters.
     quarters = tx / (60.0 / qpm)
     return Alignment(score=score, quarters=quarters, seconds=ty, qpm=qpm,
                      audio_path=audio_path, audio_duration=duration,
-                     refined=refine)
+                     refined=refine and backend == "chroma-dtw",
+                     backend=backend)

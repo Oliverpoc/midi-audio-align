@@ -21,6 +21,10 @@ def main(argv=None) -> int:
     p.add_argument("score", help="MIDI, MusicXML, Humdrum kern, MEI or ABC")
     p.add_argument("audio", help="wav / flac / mp3 / m4a")
     p.add_argument("-o", "--outdir", default="out", help="output directory")
+    p.add_argument("--backend", default="chroma-dtw",
+                   help="alignment engine: 'chroma-dtw' (built in) or "
+                        "'synctoolbox' (needs the extra; memory-safe on long "
+                        "pieces)")
     p.add_argument("--refine", action="store_true",
                    help="second high-resolution banded DTW pass "
                         "(see README: rarely helps on real audio)")
@@ -44,8 +48,8 @@ def main(argv=None) -> int:
 
     if v:
         print("aligning ...")
-    al = align(a.score, a.audio, refine=a.refine, band_rad=a.band,
-               hop=a.hop, qpm=a.qpm, verbose=v)
+    al = align(a.score, a.audio, backend=a.backend, refine=a.refine,
+               band_rad=a.band, hop=a.hop, qpm=a.qpm, verbose=v)
 
     if not al.score.time_signature_is_trustworthy and v:
         print("  ! no time signature in the score -- bar numbers are guesses")
@@ -73,6 +77,7 @@ def main(argv=None) -> int:
 
     out = {
         "score": a.score, "audio": a.audio, "refined": al.refined,
+        "backend": al.backend,
         "qpm": al.qpm, "audio_duration": al.audio_duration,
         "time_signature": al.score.time_signature,
         "bar_length_quarters": al.score.bar_length_quarters,

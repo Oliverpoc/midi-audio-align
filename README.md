@@ -420,22 +420,56 @@ compared is the alignment engine and nothing else.
 Two independent implementations landing within 15–27 ms of each other is
 stronger evidence for both than either one's self-assessment.
 
+**Against synthetic ground truth**, where the true mapping is known exactly
+(`tests/test_backends.py`), synctoolbox is slightly more accurate:
+
+| | median error |
+|---|---|
+| `chroma-dtw` | 11.6 ms |
+| `synctoolbox` | **8.9 ms** |
+
+**On real recordings, neither dominates.** synctoolbox wins on the Prokofiev;
+the built-in backend wins on the Bach fugue (onset median 27.3 ms against
+33.1 ms). Which is ahead depends on the material.
+
 **Are the results equally good?**
 
 | | maalign | synctoolbox |
 |---|---|---|
 | onset agreement, median | 37.0 / 38.7 / 37.8 ms | **36.7 / 29.8 / 32.7 ms** |
 | cross-recording agreement | 0.934 (lift +0.182) | 0.934 (lift +0.183) |
-| runtime, ~200 s audio | 14–15 s | **7–9 s** |
+| runtime, one 193 s alignment | **13.6 s** | 16.0 s |
+| peak memory, 193 s | 1.95 GB | **0.57 GB** |
 
-By the strong metric they are indistinguishable. On onset agreement
-synctoolbox is slightly ahead, and it is about twice as fast.
+By the strong metric they are indistinguishable. On onset agreement synctoolbox
+is slightly ahead. Runtime is comparable — an earlier version of this table
+claimed synctoolbox was twice as fast, which was an artifact of amortising its
+reference-feature extraction across three performances while charging maalign
+for a fresh reference each time; measured per single alignment they are within
+20% of each other.
 
-**So use synctoolbox** if you want the mature, better-tested option — it is
-what this recommends elsewhere in the README and the numbers back that up.
-`maalign` is competitive, not better; what it offers is a small dependency
-footprint, the validation tooling in `maalign.validate`, and the time-stretch
-in `maalign.tsm`.
+**Memory is where the difference is real, and it decides long pieces.**
+MrMsDTW is anchor-based and never builds a full cost matrix, so it stays
+roughly linear. maalign's coarse pass is quadratic. On a 10-minute input:
+
+| | time | peak memory |
+|---|---|---|
+| synctoolbox, defaults | 43 s | 1.14 GB |
+| maalign, `--hop 2048` | 9 s | 1.18 GB |
+| maalign, default `--hop 512` | — | ~17 GB, not attempted |
+
+With the documented `--hop` workaround maalign matches it and is faster. Without
+knowing about that flag, a 10-minute movement fails and an 18-minute one is
+hopeless. **synctoolbox is safe by default; maalign has to be told.** That is a
+robustness difference, not a capability one, and it is the reason to prefer
+synctoolbox for whole movements.
+
+**So use synctoolbox** for the alignment itself if you can — it is the mature,
+better-tested option, and `backend="synctoolbox"` below wires it in without
+giving up the rest of this package. `maalign` is competitive, not better; what
+it adds is a small default dependency footprint, the validation tooling in
+`maalign.validate`, and the time-stretch in `maalign.tsm`, none of which
+synctoolbox provides.
 
 **Where they disagree is interesting.** Thirteen of 177 bars carry 47% of the
 total disagreement; across the other 164 the median is 23.3 ms. Boundaries
@@ -460,8 +494,18 @@ comparison is not vendored here because it needs commercial recordings.
 from maalign import align, load_score, validate, tsm, synth, features, dtw
 ```
 
-**`align(score_path, audio_path, *, refine=False, band_rad=0.15, qpm=None,
-sr=22050, hop=512, verbose=False) -> Alignment`**
+**`align(score_path, audio_path, *, backend="chroma-dtw", refine=False,
+band_rad=0.15, qpm=None, sr=22050, hop=512, verbose=False) -> Alignment`**
+
+`backend` selects the engine: `"chroma-dtw"` (built in, no extra dependency,
+quadratic memory) or `"synctoolbox"` (needs
+`pip install 'midi-audio-align[synctoolbox]'`; memory-safe on long pieces).
+`backends.available()` lists what this environment can use. `refine` applies
+only to the built-in backend.
+
+```bash
+maalign score.mxl recording.mp3 --backend synctoolbox
+```
 
 **`Alignment`**
 
