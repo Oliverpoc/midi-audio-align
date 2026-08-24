@@ -316,6 +316,14 @@ Shan & Tsai, *Just Label the Repeats*, ISMIR 2024 — not implemented here.)
 ritardando are where the path is loosest — there is little spectral change for
 the features to lock onto. Expect the worst residuals at the very end.
 
+**A whole movement may not fit in memory.** This is the failure you are most
+likely to hit after a structural mismatch, and it looks like a `MemoryError` or
+the machine swapping rather than anything musical. The coarse DTW allocates a
+full n x m matrix, so cost grows with the *square* of the length: fine at four
+minutes, impossible at twenty. Raise `--hop` and add `--refine` — see
+[Install](#install) for the measured numbers. `--band` does not help; it prunes
+the search, not the allocation.
+
 **Transposition** breaks it. Chroma is octave-invariant, so octave differences
 cost nothing, but a performance in a different key will not align.
 
