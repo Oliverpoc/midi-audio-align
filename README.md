@@ -397,6 +397,63 @@ Clavier project also released the notation CC0, at
 
 ---
 
+## Compared with synctoolbox
+
+[synctoolbox](https://github.com/meinardmueller/synctoolbox) is the reference
+implementation from the group that developed most of the methods this borrows.
+Running both on the same material is the closest thing to ground truth
+available for a real recording, so here it is.
+
+Prokofiev, Sonata No. 7 Op. 83 III *Precipitato* — 177 bars of 7/8, 3734 notes,
+three pianists. Both engines were given the **same** reference audio
+(synthesised once from the MusicXML) and the same recordings, so what is
+compared is the alignment engine and nothing else.
+
+**Do they agree with each other?**
+
+| | median | p95 | within 50 ms |
+|---|---|---|---|
+| Pollini | 14.9 ms | 131.6 ms | 86.6% |
+| Horowitz 1953 | 17.1 ms | 243.2 ms | 83.0% |
+| Sokolov | 27.1 ms | 165.9 ms | 72.6% |
+
+Two independent implementations landing within 15–27 ms of each other is
+stronger evidence for both than either one's self-assessment.
+
+**Are the results equally good?**
+
+| | maalign | synctoolbox |
+|---|---|---|
+| onset agreement, median | 37.0 / 38.7 / 37.8 ms | **36.7 / 29.8 / 32.7 ms** |
+| cross-recording agreement | 0.934 (lift +0.182) | 0.934 (lift +0.183) |
+| runtime, ~200 s audio | 14–15 s | **7–9 s** |
+
+By the strong metric they are indistinguishable. On onset agreement
+synctoolbox is slightly ahead, and it is about twice as fast.
+
+**So use synctoolbox** if you want the mature, better-tested option — it is
+what this recommends elsewhere in the README and the numbers back that up.
+`maalign` is competitive, not better; what it offers is a small dependency
+footprint, the validation tooling in `maalign.validate`, and the time-stretch
+in `maalign.tsm`.
+
+**Where they disagree is interesting.** Thirteen of 177 bars carry 47% of the
+total disagreement; across the other 164 the median is 23.3 ms. Boundaries
+account for most of it (lead-in silence and the final decay — expected). But a
+cluster at m.73–77 shows up in all three performances and is **unexplained**.
+Three hypotheses were tested and two failed:
+
+| hypothesis | correlation with disagreement |
+|---|---|
+| thinner texture is harder to align | +0.120 — rejected, and the sign is backwards |
+| texture-change points are harder | −0.163 — rejected |
+| where the performers themselves differ most | +0.301 — weakly supported |
+
+Reproduce with `examples/` and the scripts in the companion project; the
+comparison is not vendored here because it needs commercial recordings.
+
+---
+
 ## API
 
 ```python
@@ -473,7 +530,8 @@ numbers. `examples/fetch_bach.py` is only needed to try it on real music.
 
 This is a small, dependency-light implementation of well-established ideas, not
 a new method. If you need the mature toolkit, use
-[synctoolbox](https://github.com/meinardmueller/synctoolbox).
+[synctoolbox](https://github.com/meinardmueller/synctoolbox) — see
+[Compared with synctoolbox](#compared-with-synctoolbox) for measured numbers.
 
 - Ewert, Müller & Grosche (2009), *High resolution audio synchronization using
   chroma onset features* — the DLNCO idea this borrows.
